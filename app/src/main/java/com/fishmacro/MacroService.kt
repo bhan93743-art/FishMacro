@@ -27,14 +27,18 @@ class MacroService : AccessibilityService() {
     private val biteTimeoutMs = 8000L
     private val resultWaitMs = 3000L
     private val tapGapMs = 60L
+    private val endGapMs = 2500L
+    private val maxMinigameMs = 25000L
+    private val shotIntervalMs = 1100L
     private val tapXRatio = 0.5f
     private val tapYRatio = 0.55f
     // ==================
 
     private var state = 0
     private var stateStart = 0L
-    private var tapCount = 0
-    private var missCount = 0
+    private var lastSeen = 0L
+    private var lastShot = 0L
+    private var shotBusy = false
 
     private fun now() = System.currentTimeMillis()
 
@@ -69,8 +73,9 @@ class MacroService : AccessibilityService() {
         if (running) return
         running = true
         state = 0
-        tapCount = 0
-        missCount = 0
+        lastSeen = 0L
+        lastShot = 0L
+        shotBusy = false
         Toast.makeText(this, "낚시 매크로 시작", Toast.LENGTH_SHORT).show()
         handler.post { tick() }
     }
@@ -83,49 +88,42 @@ class MacroService : AccessibilityService() {
 
     private fun tick() {
         if (!running) return
+        val t = now()
+        var delay = 300L
         when (state) {
             0 -> {
                 gesture(holdMs)
                 state = 1
-                stateStart = now()
-                handler.postDelayed({ tick() }, holdMs + 400)
+                stateStart = t + holdMs
+                delay = holdMs + 300
             }
-            1 -> checkMinigame { found ->
-                if (running) {
-                    if (found == true) {
-                        state = 2
-                        tapCount = 0
-                        missCount = 0
-                        handler.post { tick() }
-                    } else if (now() - stateStart > biteTimeoutMs) {
-                        state = 0
-                        handler.postDelayed({ tick() }, 500)
-                    } else {
-                        handler.postDelayed({ tick() }, 250)
-                    }
+            1 -> {
+                requestShot()
+                if (lastSeen > stateStart) {
+                    state = 2
+                    stateStart = t
+                    lastSeen = t
+                    delay = tapGapMs
+                } else if (t - stateStart > biteTimeoutMs) {
+                    state = 0
                 }
             }
             2 -> {
                 gesture(20L)
-                tapCount++
-                if (tapCount % 6 == 0) {
-                    checkMinigame { found ->
-                        if (running) {
-                            if (found == true) missCount = 0
-                            else if (found == false) missCount++
-                            if (missCount >= 2) {
-                                state = 3
-                                handler.postDelayed({ state = 0; tick() }, resultWaitMs)
-                            } else {
-                                handler.postDelayed({ tick() }, tapGapMs)
-                            }
-                        }
-                    }
-                } else {
-                    handler.postDelayed({ tick() }, tapGapMs)
+                requestShot()
+                if (t - lastSeen > endGapMs || t - stateStart > maxMinigameMs) {
+                    state = 3
+                    stateStart = t
+                }
+                delay = tapGapMs
+            }
+            else -> {
+                if (t - stateStart > resultWaitMs) {
+                    state = 0
                 }
             }
         }
+        handler.postDelayed({ tick() }, delay)
     }
 
     private fun gesture(duration: Long) {
@@ -138,28 +136,37 @@ class MacroService : AccessibilityService() {
         dispatchGesture(g, null, null)
     }
 
-    private fun checkMinigame(cb: (Boolean?) -> Unit) {
+    private fun requestShot() {
+        val t = now()
+        if (shotBusy && t - lastShot > 3000) shotBusy = false
+        if (shotBusy || t - lastShot < shotIntervalMs) return
+        shotBusy = true
+        lastShot = t
         takeScreenshot(
             Display.DEFAULT_DISPLAY,
             mainExecutor,
             object : AccessibilityService.TakeScreenshotCallback {
                 override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
                     var found = false
-                    val hw = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
-                    if (hw != null) {
-                        val bmp = hw.copy(Bitmap.Config.ARGB_8888, false)
-                        hw.recycle()
-                        if (bmp != null) {
-                            found = detectRed(bmp)
-                            bmp.recycle()
+                    try {
+                        val hw = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                        if (hw != null) {
+                            val bmp = hw.copy(Bitmap.Config.ARGB_8888, false)
+                            hw.recycle()
+                            if (bmp != null) {
+                                found = detectRed(bmp)
+                                bmp.recycle()
+                            }
                         }
+                    } catch (e: Exception) {
                     }
                     result.hardwareBuffer.close()
-                    cb(found)
+                    if (found) lastSeen = now()
+                    shotBusy = false
                 }
 
                 override fun onFailure(errorCode: Int) {
-                    cb(null)
+                    shotBusy = false
                 }
             }
         )
