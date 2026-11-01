@@ -23,15 +23,16 @@ class MacroService : AccessibilityService() {
     private var panel: LinearLayout? = null
 
     // ===== 설정값 =====
-    private val holdMs = 1200L
+    private val holdMs = 700L
     private val biteTimeoutMs = 8000L
-    private val resultWaitMs = 3000L
+    private val minBiteMs = 1500L
+    private val resultWaitMs = 1500L
     private val tapGapMs = 60L
-    private val endGapMs = 2500L
+    private val endGapMs = 1800L
     private val maxMinigameMs = 25000L
     private val shotIntervalMs = 1100L
-    private val tapXRatio = 0.5f
-    private val tapYRatio = 0.55f
+    private val tapXRatio = 0.3f
+    private val tapYRatio = 0.5f
     // ==================
 
     private var state = 0
@@ -99,7 +100,7 @@ class MacroService : AccessibilityService() {
             }
             1 -> {
                 requestShot()
-                if (lastSeen > stateStart) {
+                if (t - stateStart > minBiteMs && lastSeen > stateStart) {
                     state = 2
                     stateStart = t
                     lastSeen = t
@@ -154,7 +155,7 @@ class MacroService : AccessibilityService() {
                             val bmp = hw.copy(Bitmap.Config.ARGB_8888, false)
                             hw.recycle()
                             if (bmp != null) {
-                                found = detectRed(bmp)
+                                found = detectMinigame(bmp)
                                 bmp.recycle()
                             }
                         }
@@ -172,27 +173,52 @@ class MacroService : AccessibilityService() {
         )
     }
 
-    private fun detectRed(b: Bitmap): Boolean {
-        val w = b.width
-        val h = b.height
-        val x0 = (w * 0.700f).toInt()
-        val x1 = (w * 0.745f).toInt()
-        val y0 = (h * 0.88f).toInt()
-        val y1 = (h * 0.92f).toInt()
-        var cnt = 0
-        var total = 0
-        var y = y0
-        while (y < y1) {
-            var x = x0
-            while (x < x1) {
-                val c = b.getPixel(x, y)
-                total++
-                if (Color.red(c) > 190 && Color.green(c) < 110 && Color.blue(c) < 110) cnt++
+    private fun detectMinigame(bmp: Bitmap): Boolean {
+        val w = bmp.width
+        val h = bmp.height
+
+        // 1) 빨간 정지 버튼
+        var red = 0
+        var redTotal = 0
+        var y = (h * 0.88f).toInt()
+        val yEnd = (h * 0.92f).toInt()
+        val xStart = (w * 0.700f).toInt()
+        val xEnd = (w * 0.745f).toInt()
+        while (y < yEnd) {
+            var x = xStart
+            while (x < xEnd) {
+                val c = bmp.getPixel(x, y)
+                redTotal++
+                if (Color.red(c) > 190 && Color.green(c) < 110 && Color.blue(c) < 110) red++
                 x += 4
             }
             y += 4
         }
-        return total > 0 && cnt * 100 / total >= 20
+        if (redTotal == 0 || red * 100 / redTotal < 20) return false
+
+        // 2) 버튼 왼쪽의 어두운 회색 게이지 막대
+        var dark = 0
+        var darkTotal = 0
+        y = (h * 0.89f).toInt()
+        val yEnd2 = (h * 0.93f).toInt()
+        val xStart2 = (w * 0.60f).toInt()
+        val xEnd2 = (w * 0.685f).toInt()
+        while (y < yEnd2) {
+            var x = xStart2
+            while (x < xEnd2) {
+                val c = bmp.getPixel(x, y)
+                val r = Color.red(c)
+                val g = Color.green(c)
+                val bl = Color.blue(c)
+                val mx = maxOf(r, maxOf(g, bl))
+                val mn = minOf(r, minOf(g, bl))
+                darkTotal++
+                if (mx < 95 && mx - mn < 30) dark++
+                x += 4
+            }
+            y += 4
+        }
+        return darkTotal > 0 && dark * 100 / darkTotal >= 30
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
