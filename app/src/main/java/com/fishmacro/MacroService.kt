@@ -23,12 +23,12 @@ class MacroService : AccessibilityService() {
     private var panel: LinearLayout? = null
 
     // ===== 설정값 =====
-    private val holdMs = 700L
+    private val holdMs = 1200L
     private val biteTimeoutMs = 8000L
     private val minBiteMs = 1500L
-    private val resultWaitMs = 1500L
+    private val resultWaitMs = 3000L
     private val tapGapMs = 60L
-    private val endGapMs = 1800L
+    private val endGapMs = 2500L
     private val maxMinigameMs = 25000L
     private val shotIntervalMs = 1100L
     private val tapXRatio = 0.3f
